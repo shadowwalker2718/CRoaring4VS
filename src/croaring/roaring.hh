@@ -1,8 +1,7 @@
-/* auto-generated on Tue 13 Sep 2016 17:42:00 EDT. Do not edit! */
+/* auto-generated on Wed Dec 28 17:58:15 EST 2016. Do not edit! */
 #include "roaring.h"
 #include "roaring.c"
-/* begin file /Users/lemire/CVS/github/CRoaring/cpp/roaring.hh */
-#line 8 "/Users/lemire/CVS/github/CRoaring/cpp/roaring.hh"
+/* begin file /home/dlemire/CVS/github/CRoaring/cpp/roaring.hh */
 /*
 A C++ header for Roaring Bitmaps.
 */
@@ -165,6 +164,16 @@ class Roaring {
     bool isEmpty() const { return roaring_bitmap_is_empty(roaring); }
 
     /**
+    * Returns true if the bitmap is subset of the other.
+    */
+    bool isSubset(const Roaring &r) const { return roaring_bitmap_is_subset(roaring, r.roaring); }
+
+    /**
+    * Returns true if the bitmap is strict subset of the other.
+    */
+    bool isStrictSubset(const Roaring &r) const { return roaring_bitmap_is_strict_subset(roaring, r.roaring); }
+
+    /**
      * Convert the bitmap to an array. Write the output to "ans",
      * caller is responsible to ensure that there is enough memory
      * allocated
@@ -201,8 +210,15 @@ class Roaring {
      * efficient;
      * also convert from run containers when more space efficient.  Returns
      * true if the result has at least one run container.
+     * Additional savings might be possible by calling shrinkToFit().
      */
     bool runOptimize() { return roaring_bitmap_run_optimize(roaring); }
+
+    /**
+     * If needed, reallocate memory to shrink the memory usage. Returns
+     * the number of bytes saved.
+    */
+    size_t shrinkToFit() { return roaring_bitmap_shrink_to_fit(roaring); }
 
     /**
      * Iterate over the bitmap elements. The function iterator is called once
@@ -358,4 +374,4 @@ class Roaring {
 };
 
 #endif /* INCLUDE_ROARING_HH_ */
-/* end file /Users/lemire/CVS/github/CRoaring/cpp/roaring.hh */
+/* end file /home/dlemire/CVS/github/CRoaring/cpp/roaring.hh */
