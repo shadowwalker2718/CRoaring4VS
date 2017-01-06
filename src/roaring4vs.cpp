@@ -118,6 +118,29 @@ Roaring4VS &Roaring4VS::operator&=(const Roaring4VS &r) {
 }
 
 /**
+* Compute the difference between the current bitmap and the provided
+* bitmap,
+* writing the result in the current bitmap. The provided bitmap is not
+* modified.
+*/
+Roaring4VS &operator-=(const Roaring4VS &r) {
+    roaring_bitmap_andnot_inplace(roaring, r.roaring);
+    return *this;
+}
+
+/**
+* Computes the difference between two bitmaps and returns new bitmap.
+* The current bitmap and the provided bitmap are unchanged.
+*/
+Roaring4VS operator-(const Roaring4VS &o) const {
+    roaring_bitmap_t *r = roaring_bitmap_andnot(roaring, o.roaring);
+    if (r == NULL) {
+        throw std::runtime_error("failed materalization in andnot");
+    }
+    return Roaring(r);
+}
+
+/**
 * Compute the union between the current bitmap and the provided bitmap,
 * writing the result in the current bitmap. The provided bitmap is not
 * modified.
@@ -345,4 +368,96 @@ Roaring4VS Roaring4VS::fastunion(size_t n, const Roaring4VS **inputs) {
     }
     free(x);
     return ans;
+}
+
+
+/**
+ * Used to go through the set bits. Not optimally fast, but convenient.
+ */
+class RoaringSetBitForwardIterator4VS {
+public:
+  typedef std::forward_iterator_tag iterator_category;
+  typedef uint32_t *pointer;
+  typedef uint32_t &reference_type;
+  typedef uint32_t value_type;
+  typedef int32_t difference_type;
+  typedef RoaringSetBitForwardIterator4VS type_of_iterator;
+
+  /**
+   * Provides the location of the set bit.
+   */
+  value_type operator*() const {
+    return i->current_value;
+  }
+
+  bool operator<(const type_of_iterator &o) {
+    return i->current_value < *o;
+  }
+
+  bool operator<=(const type_of_iterator &o) {
+    return i->current_value <= *o;
+  }
+
+  bool operator>(const type_of_iterator &o) {
+    return i->current_value > *o;
+  }
+
+  bool operator>=(const type_of_iterator &o) {
+    return i->current_value >= *o;
+  }
+
+  type_of_iterator &operator++() {// ++i, must returned inc. value
+    roaring_advance_uint32_iterator(i);
+    return *this;
+  }
+
+  type_of_iterator operator++(int) {// i++, must return orig. value
+    RoaringSetBitForwardIterator4VS orig(*this);
+    roaring_advance_uint32_iterator(i);
+    return orig;
+  }
+
+  bool operator==(const RoaringSetBitForwardIterator4VS &o) {
+    return i->current_value == *o;
+  }
+
+  bool operator!=(const RoaringSetBitForwardIterator4VS &o) {
+    return i->current_value != *o;
+  }
+
+  RoaringSetBitForwardIterator4VS(const Roaring & parent, bool exhausted = false) : i(NULL) {
+    if(exhausted) {
+        i = (roaring_uint32_iterator_t *) malloc(sizeof(roaring_uint32_iterator_t));
+        i->parent = parent.roaring;
+        i->container_index = INT32_MAX;
+        i->has_value = false;
+        i->current_value = UINT32_MAX;
+    } else {
+      i = roaring_create_iterator(parent.roaring);
+    }
+  }
+
+  virtual ~RoaringSetBitForwardIterator4VS() {
+    roaring_free_uint32_iterator(i);
+    i = NULL;
+  }
+
+  RoaringSetBitForwardIterator4VS(
+      const RoaringSetBitForwardIterator4VS &o)
+      : i(NULL) {
+    i = roaring_copy_uint32_iterator (o.i);
+  }
+
+
+
+  roaring_uint32_iterator_t *  i;
+};
+
+
+RoaringSetBitForwardIterator4VS Roaring4VS::begin() const {
+      return RoaringSetBitForwardIterator4VS(*this);
+}
+
+RoaringSetBitForwardIterator4VS Roaring4VS::end() const {
+      return RoaringSetBitForwardIterator4VS(*this, true);
 }

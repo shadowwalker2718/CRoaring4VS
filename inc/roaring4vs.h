@@ -10,10 +10,12 @@ A C++ wrapper around the CRoaring project to enable compilation of CRoaring with
 
 
 namespace roaring {
+    class RoaringSetBitForwardIterator4VS;
     typedef bool (*RoaringIterator)(uint32_t value, void *param);
 
     class Roaring4VS {
     public:
+
         /**
          * Create an empty bitmap
          */
@@ -82,6 +84,15 @@ namespace roaring {
          * modified.
          */
         Roaring4VS &operator&=(const Roaring4VS &r);
+
+
+        /**
+        * Compute the difference between the current bitmap and the provided
+        * bitmap,
+        * writing the result in the current bitmap. The provided bitmap is not
+        * modified.
+        */
+        Roaring4VS &operator-=(const Roaring4VS &r);
 
         /**
          * Compute the union between the current bitmap and the provided bitmap,
@@ -208,6 +219,12 @@ namespace roaring {
         Roaring4VS operator&(const Roaring4VS &o) const;
 
         /**
+        * Computes the difference between two bitmaps and returns new bitmap.
+        * The current bitmap and the provided bitmap are unchanged.
+        */
+        Roaring4VS operator-(const Roaring4VS &o) const;
+
+        /**
          * Computes the union between two bitmaps and returns new bitmap.
          * The current bitmap and the provided bitmap are unchanged.
          */
@@ -241,6 +258,9 @@ namespace roaring {
         static Roaring4VS fastunion(size_t n, const Roaring4VS **inputs);
 
         void *roaring;
+        typedef  RoaringSetBitForwardIterator4VS const_iterator;
+        const_iterator begin() const ;
+        const_iterator end() const ; 
     };
 
 }
