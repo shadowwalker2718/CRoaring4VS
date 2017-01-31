@@ -1,4 +1,4 @@
-/* auto-generated on Fri Jan  6 09:55:09 EST 2017. Do not edit! */
+/* auto-generated on Tue Jan 31 16:15:16 EST 2017. Do not edit! */
 #include "roaring.h"
 /* begin file src/array_util.c */
 #include <assert.h>
@@ -2496,6 +2496,9 @@ void bitset_flip_list(void *bitset, const uint16_t *list, uint64_t length) {
 #include <stdio.h>
 #include <stdlib.h>
 
+extern inline uint16_t array_container_minimum(const array_container_t *arr) ;
+extern inline uint16_t array_container_maximum(const array_container_t *arr);
+extern inline int array_container_rank(const array_container_t *arr, uint16_t x) ;
 extern inline bool array_container_contains(const array_container_t *arr,
                                              uint16_t pos);
 extern int array_container_cardinality(const array_container_t *array);
@@ -2926,6 +2929,14 @@ bool array_container_iterate(const array_container_t *cont, uint32_t base,
                              roaring_iterator iterator, void *ptr) {
     for (int i = 0; i < cont->cardinality; i++)
         if (!iterator(cont->array[i] + base, ptr)) return false;
+    return true;
+}
+
+bool array_container_iterate64(const array_container_t *cont, uint32_t base,
+                               roaring_iterator64 iterator,
+                               uint64_t high_bits, void *ptr) {
+    for (int i = 0; i < cont->cardinality; i++)
+        if (!iterator(high_bits | (uint64_t)(cont->array[i] + base), ptr)) return false;
     return true;
 }
 /* end file src/containers/array.c */
@@ -3373,6 +3384,20 @@ bool bitset_container_iterate(const bitset_container_t *cont, uint32_t base, roa
   return true;
 }
 
+bool bitset_container_iterate64(const bitset_container_t *cont, uint32_t base, roaring_iterator64 iterator, uint64_t high_bits, void *ptr) {
+  for (int32_t i = 0; i < BITSET_CONTAINER_SIZE_IN_WORDS; ++i ) {
+    uint64_t w = cont->array[i];
+    while (w != 0) {
+      uint64_t t = w & -w;
+      int r = __builtin_ctzll(w);
+      if(!iterator(high_bits | (uint64_t)(r + base), ptr)) return false;
+      w ^= t;
+    }
+    base += 64;
+  }
+  return true;
+}
+
 
 bool bitset_container_equals(bitset_container_t *container1, bitset_container_t *container2) {
 	if((container1->cardinality != BITSET_UNKNOWN_CARDINALITY) && (container2->cardinality != BITSET_UNKNOWN_CARDINALITY)) {
@@ -3432,6 +3457,49 @@ bool bitset_container_select(const bitset_container_t *container, uint32_t *star
     }
     assert(false);
     __builtin_unreachable();
+}
+
+
+/* Returns the smallest value (assumes not empty) */
+uint16_t bitset_container_minimum(const bitset_container_t *container) {
+  for (int32_t i = 0; i < BITSET_CONTAINER_SIZE_IN_WORDS; ++i ) {
+    uint64_t w = container->array[i];
+    while (w != 0) {
+      int r = __builtin_ctzll(w);
+      return r + i * 64;
+    }
+  }
+  return UINT16_MAX;
+}
+
+/* Returns the largest value (assumes not empty) */
+inline uint16_t bitset_container_maximum(const bitset_container_t *container) {
+  for (int32_t i = BITSET_CONTAINER_SIZE_IN_WORDS - 1; i > 0; --i ) {
+    uint64_t w = container->array[i];
+    if (w != 0) {
+      int r = __builtin_clzll(w);
+      return i * 64 + 63  - r;
+    }
+  }
+  return 0;
+}
+
+/* Returns the number of values equal or smaller than x */
+int bitset_container_rank(const bitset_container_t *container, uint16_t x) {
+  uint32_t x32 = x;
+  int sum = 0;
+  uint32_t k = 0;
+  for (; k + 63 <= x32; k += 64)  {
+    sum += hamming(container->array[k / 64]);
+  }
+  // at this point, we have covered everything up to k, k not included.
+  // we have that k < x, but not so large that k+63<=x
+  // k is a power of 64
+  int bitsleft = x32 - k + 1;// will be in [0,64)
+  uint64_t leftoverword = container->array[k / 64];// k / 64 should be within scope
+  leftoverword = leftoverword & ((UINT64_C(1) << bitsleft) - 1);
+  sum += hamming(leftoverword);
+  return sum;
 }
 /* end file src/containers/bitset.c */
 /* begin file src/containers/containers.c */
@@ -4588,12 +4656,21 @@ void array_bitset_container_intersection(const array_container_t *src_1,
     int32_t newcard = 0;  // dst could be src_1
     const int32_t origcard = src_1->cardinality;
     for (int i = 0; i < origcard; ++i) {
-        // could probably be vectorized
         uint16_t key = src_1->array[i];
-        // next bit could be branchless
-        if (bitset_container_contains(src_2, key)) {
-            dst->array[newcard++] = key;
-        }
+        // this branchless approach is much faster...
+        dst->array[newcard] = key;
+        newcard +=  bitset_container_contains(src_2, key); 
+        /**
+         * we could do it this way instead...
+         * if (bitset_container_contains(src_2, key)) {
+         * dst->array[newcard++] = key;
+         * }
+         * but if the result is unpredictible, the processor generates
+         * many mispredicted branches.
+         * Difference can be huge (from 3 cycles when predictible all the way
+         * to 16 cycles when unpredictible.
+         * See https://github.com/lemire/Code-used-on-Daniel-Lemire-s-blog/blob/master/extra/bitset/c/arraybitsetintersection.c
+         */
     }
     dst->cardinality = newcard;
 }
@@ -5783,6 +5860,8 @@ int run_run_container_ixor(run_container_t *src_1, const run_container_t *src_2,
 #include <x86intrin.h>
 #endif
 
+extern inline uint16_t run_container_minimum(const run_container_t *run);
+extern inline uint16_t run_container_maximum(const run_container_t *run);
 extern inline int32_t interleavedBinarySearch(const rle16_t *array,
                                       int32_t lenarray, uint16_t ikey);
 extern inline bool run_container_contains(const run_container_t *run,
@@ -6409,6 +6488,19 @@ bool run_container_iterate(const run_container_t *cont, uint32_t base,
     return true;
 }
 
+bool run_container_iterate64(const run_container_t *cont, uint32_t base,
+                             roaring_iterator64 iterator,
+                             uint64_t high_bits, void *ptr) {
+    for (int i = 0; i < cont->n_runs; ++i) {
+        uint32_t run_start = base + cont->runs[i].value;
+        uint16_t le = cont->runs[i].length;
+
+        for (int j = 0; j <= le; ++j)
+            if (!iterator(high_bits | (uint64_t)(run_start + j), ptr)) return false;
+    }
+    return true;
+}
+
 bool run_container_equals(run_container_t *container1,
                           run_container_t *container2) {
     if (container1->n_runs != container2->n_runs) {
@@ -6521,6 +6613,23 @@ bool run_container_select(const run_container_t *container,
             *start_rank += length + 1;
     }
     return false;
+}
+
+int run_container_rank(const run_container_t *container, uint16_t x) {
+  int sum = 0;
+  uint32_t x32 = x;
+  for (int i = 0; i < container->n_runs; i++) {
+    uint32_t startpoint = container->runs[i].value;
+    uint32_t length = container->runs[i].length;
+    uint32_t endpoint = length + startpoint;
+    if(x <= endpoint) {
+      if(x < startpoint) break;
+      return sum + (x32 - startpoint) + 1;
+    } else {
+      sum += length + 1;
+    }
+  }
+  return sum;
 }
 /* end file src/containers/run.c */
 /* begin file src/roaring.c */
@@ -7609,6 +7718,17 @@ bool roaring_iterate(const roaring_bitmap_t *ra, roaring_iterator iterator,
     return true;
 }
 
+bool roaring_iterate64(const roaring_bitmap_t *ra, roaring_iterator64 iterator,
+                       uint64_t high_bits, void *ptr) {
+    for (int i = 0; i < ra->high_low_container.size; ++i)
+        if (!container_iterate64(ra->high_low_container.containers[i], ra->high_low_container.typecodes[i],
+                ((uint32_t)ra->high_low_container.keys[i]) << 16, iterator,
+                high_bits, ptr)) {
+            return false;
+        }
+    return true;
+}
+
 
 
 /****
@@ -8329,6 +8449,58 @@ void roaring_bitmap_repair_after_lazy(roaring_bitmap_t *ra) {
         ra->high_low_container.typecodes[i] = new_typecode;
     }
 }
+
+/**
+* roaring_bitmap_rank returns the number of integers that are smaller or equal to x.
+*/
+uint64_t  roaring_bitmap_rank(const roaring_bitmap_t *bm, uint32_t x) {
+    uint64_t size = 0;
+    uint32_t xhigh = x >> 16;
+    for (int i = 0; i < bm->high_low_container.size; i++) {
+      uint32_t key = bm->high_low_container.keys[i];
+      if (xhigh > key) {
+        size += container_get_cardinality(bm->high_low_container.containers[i], bm->high_low_container.typecodes[i]);
+      } else if (xhigh == key) {
+        return size + container_rank(bm->high_low_container.containers[i], bm->high_low_container.typecodes[i], x & 0xFFFF);
+      } else {
+        return size;
+      }
+    }
+    return size;
+}
+
+
+/**
+* roaring_bitmap_smallest returns the smallest value in the set.
+* Returns UINT32_MAX if the set is empty.
+*/
+uint32_t roaring_bitmap_minimum(const roaring_bitmap_t *bm) {
+  if(bm->high_low_container.size > 0) {
+      void * container = bm->high_low_container.containers[0];
+      uint8_t typecode = bm->high_low_container.typecodes[0];
+      uint32_t key = bm->high_low_container.keys[0];
+      uint32_t lowvalue = container_minimum(container, typecode);
+      return lowvalue | (key << 16);
+  }
+  return UINT32_MAX;
+}
+
+
+/**
+* roaring_bitmap_smallest returns the greatest value in the set.
+* Returns 0 if the set is empty.
+*/
+uint32_t roaring_bitmap_maximum(const roaring_bitmap_t *bm) {
+  if(bm->high_low_container.size > 0) {
+      void * container = bm->high_low_container.containers[bm->high_low_container.size - 1];
+      uint8_t typecode = bm->high_low_container.typecodes[bm->high_low_container.size - 1];
+      uint32_t key = bm->high_low_container.keys[bm->high_low_container.size - 1];
+      uint32_t lowvalue = container_maximum(container, typecode);
+      return  lowvalue | (key << 16);
+  }
+  return 0;
+}
+
 
 bool roaring_bitmap_select(const roaring_bitmap_t *bm, uint32_t rank,
                            uint32_t *element) {
